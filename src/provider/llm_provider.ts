@@ -3,6 +3,9 @@ import { Suggestion, SuggestionContext, SuggestionProvider } from "./provider";
 import { CompletrSettings, LLMProviderSettings } from "../settings";
 
 const CACHE_SEPARATOR = "\u241E"; // Record separator character to avoid clashes with real text.
+const OPENAI_CONTEXT_LIMIT = 6000;
+const DEFAULT_OPENAI_MODEL = "gpt-3.5-turbo";
+const OPENAI_JSON_PROMPT = "You are an autocomplete assistant for the Obsidian note-taking app. Return ONLY a JSON array of suggestion strings with no commentary.";
 
 class LlmSuggestionProvider implements SuggestionProvider {
 
@@ -54,12 +57,15 @@ class LlmSuggestionProvider implements SuggestionProvider {
 
     private async fetchSuggestions(settings: LLMProviderSettings, priorText: string, separator: string, query: string): Promise<Suggestion[]> {
         try {
-            const body = JSON.stringify({
-                text: priorText,
-                separator,
-                query,
-                model: settings.model,
-            });
+            const isOpenAI = this.isOpenAIEndpoint(settings.endpoint);
+            const body = isOpenAI
+                ? this.buildOpenAIBody(settings, priorText, separator, query)
+                : JSON.stringify({
+                    text: priorText,
+                    separator,
+                    query,
+                    model: settings.model,
+                });
 
             const response = await requestUrl({
                 url: settings.endpoint,
@@ -77,12 +83,57 @@ class LlmSuggestionProvider implements SuggestionProvider {
                 return [];
 
             const payload = response.json ?? this.safeParseJson(response.text);
-            const words = this.extractWords(payload);
+            let words = this.extractWords(payload);
+
+            if (!words.length)
+                words = this.extractOpenAIWords(payload);
+
             return words.map((word) => Suggestion.fromString(word));
         } catch (error) {
             console.warn("Completr: Failed to fetch LLM suggestions", error);
             return [];
         }
+    }
+
+    private buildOpenAIBody(settings: LLMProviderSettings, priorText: string, separator: string, query: string): string {
+        const clippedContext = this.clipContext(priorText, OPENAI_CONTEXT_LIMIT);
+        const model = settings.model?.trim() || DEFAULT_OPENAI_MODEL;
+
+        const userContent = [
+            "Context before cursor:",
+            clippedContext || "<empty>",
+            "",
+            `Separator character: ${separator ?? ""}`,
+            `Current query: ${query ?? ""}`,
+            "",
+            "Return up to 5 likely continuations as a JSON array of strings only.",
+        ].join("\n");
+
+        return JSON.stringify({
+            model,
+            messages: [
+                { role: "system", content: OPENAI_JSON_PROMPT },
+                { role: "user", content: userContent },
+            ],
+            temperature: 0.2,
+            n: 1,
+            max_tokens: 64,
+        });
+    }
+
+    private clipContext(priorText: string, limit: number): string {
+        if (priorText.length <= limit)
+            return priorText;
+
+        return priorText.slice(priorText.length - limit);
+    }
+
+    private isOpenAIEndpoint(endpoint: string | undefined): boolean {
+        if (!endpoint)
+            return false;
+
+        const normalised = endpoint.toLowerCase();
+        return normalised.includes("api.openai.com");
     }
 
     private safeParseJson(text: string | undefined): unknown {
@@ -118,6 +169,64 @@ class LlmSuggestionProvider implements SuggestionProvider {
         }
 
         return [];
+    }
+
+    private extractOpenAIWords(payload: unknown): string[] {
+        if (!payload || typeof payload !== "object")
+            return [];
+
+        const choices = (payload as Record<string, unknown>).choices;
+        if (!Array.isArray(choices))
+            return [];
+
+        const words: string[] = [];
+
+        for (const choice of choices) {
+            if (!choice || typeof choice !== "object")
+                continue;
+
+            const choiceRecord = choice as Record<string, unknown>;
+            const message = choiceRecord.message;
+            if (message && typeof message === "object") {
+                const content = (message as Record<string, unknown>).content;
+                if (typeof content === "string") {
+                    words.push(...this.parseOpenAIContent(content));
+                    continue;
+                }
+            }
+
+            const text = choiceRecord.text;
+            if (typeof text === "string")
+                words.push(...this.parseOpenAIContent(text));
+        }
+
+        return words;
+    }
+
+    private parseOpenAIContent(raw: string): string[] {
+        const trimmed = raw.trim();
+        if (!trimmed)
+            return [];
+
+        const codeBlockMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+        const content = codeBlockMatch ? codeBlockMatch[1].trim() : trimmed;
+
+        const parsed = this.tryParseJson(content);
+        if (Array.isArray(parsed))
+            return parsed.filter((entry): entry is string => typeof entry === "string");
+
+        return content
+            .split(/\r?\n+/)
+            .map((line) => line.replace(/^[\-\d\.]*(?:\)|\.|:)?\s*/, "").trim())
+            .filter((line) => line.length > 0);
+    }
+
+    private tryParseJson(text: string): unknown {
+        try {
+            return JSON.parse(text);
+        } catch {
+            return null;
+        }
     }
 }
 
