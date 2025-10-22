@@ -1,4 +1,4 @@
-import { Suggestion, SuggestionProvider } from "./provider/provider";
+import { Suggestion, SuggestionProvider, SuggestionTriggerSource } from "./provider/provider";
 import { Latex } from "./provider/latex_provider";
 import { WordList } from "./provider/word_list_provider";
 import { FileScanner } from "./provider/scanner_provider";
@@ -28,6 +28,7 @@ export default class SuggestionPopup extends EditorSuggest<Suggestion> {
      */
     private justClosed: boolean;
     private separatorChar: string;
+    private triggerSource: SuggestionTriggerSource = "unknown";
 
     private characterRegex: string;
     private compiledCharacterRegex: RegExp;
@@ -61,6 +62,7 @@ export default class SuggestionPopup extends EditorSuggest<Suggestion> {
     close() {
         super.close();
         this.focused = false;
+        this.triggerSource = "unknown";
     }
 
     async getSuggestions(
@@ -71,7 +73,8 @@ export default class SuggestionPopup extends EditorSuggest<Suggestion> {
         for (let provider of PROVIDERS) {
             const providerSuggestions = await provider.getSuggestions({
                 ...context,
-                separatorChar: this.separatorChar
+                separatorChar: this.separatorChar,
+                triggerSource: this.triggerSource,
             }, this.settings);
 
             if (providerSuggestions && providerSuggestions.length > 0) {
@@ -121,6 +124,8 @@ export default class SuggestionPopup extends EditorSuggest<Suggestion> {
             separatorChar
         } = matchWordBackwards(editor, cursor, (char) => this.getCharacterRegex().test(char), this.settings.maxLookBackDistance);
         this.separatorChar = separatorChar;
+
+        this.triggerSource = manualTrigger ? "manual" : "auto";
 
         return {
             start: {
