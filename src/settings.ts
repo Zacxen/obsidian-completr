@@ -59,6 +59,13 @@ export const DEFAULT_SETTINGS: CompletrSettings = {
     frontMatterIgnoreCase: true,
     calloutProviderEnabled: true,
     calloutProviderSource: CalloutProviderSource.COMPLETR,
+    llmProvider: {
+        enabled: true,
+        endpoint: "http://127.0.0.1:5000",
+        apiKey: "",
+        timeout: 10000,
+        model: "",
+    },
 }
 
 export function intoCompletrPath(vault: Vault, ...path: string[]): string {
