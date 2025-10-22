@@ -155,7 +155,10 @@ class LlmSuggestionProvider implements SuggestionProvider {
             return false;
 
         const normalised = endpoint.toLowerCase();
-        return normalised.includes("api.openai.com");
+        if (normalised.includes("api.openai.com"))
+            return true;
+
+        return /\/v\d+\/chat\/completions\b/.test(normalised);
     }
 
     private safeParseJson(text: string | undefined): unknown {
