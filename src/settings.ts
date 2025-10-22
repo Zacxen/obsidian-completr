@@ -34,6 +34,7 @@ export interface CompletrSettings {
     frontMatterIgnoreCase: boolean,
     calloutProviderEnabled: boolean,
     calloutProviderSource: CalloutProviderSource,
+    llmProvider: LLMProviderSettings,
 }
 
 export const DEFAULT_SETTINGS: CompletrSettings = {
@@ -60,8 +61,8 @@ export const DEFAULT_SETTINGS: CompletrSettings = {
     calloutProviderEnabled: true,
     calloutProviderSource: CalloutProviderSource.COMPLETR,
     llmProvider: {
-        enabled: true,
-        endpoint: "http://127.0.0.1:5000",
+        enabled: false,
+        endpoint: "",
         apiKey: "",
         timeout: 10000,
         model: "",
@@ -70,4 +71,12 @@ export const DEFAULT_SETTINGS: CompletrSettings = {
 
 export function intoCompletrPath(vault: Vault, ...path: string[]): string {
     return vault.configDir + "/plugins/obsidian-completr/" + path.join("/");
+}
+
+export interface LLMProviderSettings {
+    enabled: boolean;
+    endpoint: string;
+    apiKey?: string;
+    model?: string;
+    timeout?: number;
 }
