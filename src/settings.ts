@@ -65,7 +65,7 @@ export const DEFAULT_SETTINGS: CompletrSettings = {
     calloutProviderEnabled: true,
     calloutProviderSource: CalloutProviderSource.COMPLETR,
     llmProviderEnabled: true,
-    llmApiUrl: "http://127.0.0.1:5000",
+    llmApiUrl: "http://127.0.0.1:5000/v1/chat/completions",
     llmApiKey: "",
     llmModel: "",
     llmRequestTimeout: 10000,

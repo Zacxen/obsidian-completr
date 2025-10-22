@@ -77,6 +77,26 @@ Browse the community plugins list and search for `Completr`.
   suggestions. Only use providers that you trust with this content.
 - The API key is stored in your vault configuration file (`.obsidian/plugins/obsidian-completr/data.json`) and is only sent
   as an Authorization header when contacting your configured endpoint.
+- For OpenAI-compatible services (including local servers), point the endpoint at the `/v1/chat/completions` route. A
+  minimal request that matches the plugin's default settings looks like:
+
+  ```bash
+  curl http://127.0.0.1:5000/v1/chat/completions \
+    -H "Content-Type: application/json" \
+    -d '{
+      "messages": [
+        {
+          "role": "user",
+          "content": "Hello! Who are you?"
+        }
+      ],
+      "mode": "chat-instruct",
+      "character": "Example",
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20
+    }'
+  ```
 
 ## Example usage
 
