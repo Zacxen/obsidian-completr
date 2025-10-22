@@ -61,8 +61,8 @@ export const DEFAULT_SETTINGS: CompletrSettings = {
     calloutProviderEnabled: true,
     calloutProviderSource: CalloutProviderSource.COMPLETR,
     llmProvider: {
-        enabled: false,
-        endpoint: "",
+        enabled: true,
+        endpoint: "http://127.0.0.1:5000",
         apiKey: "",
         timeout: 10000,
         model: "",
