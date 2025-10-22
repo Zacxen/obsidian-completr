@@ -367,6 +367,64 @@ export default class CompletrSettingsTab extends PluginSettingTab {
                     }
                 }
             })
+
+        new Setting(containerEl)
+            .setName("LLM provider")
+            .setHeading();
+
+        this.createEnabledSetting("llmProviderEnabled", "Request completions from the configured language model endpoint.", containerEl);
+
+        new Setting(containerEl)
+            .setName("Endpoint")
+            .setDesc("URL of the LLM completion API. When enabled, the text around your cursor is sent to this endpoint for suggestions.")
+            .addText(text => text
+                .setPlaceholder("https://example.com/completions")
+                .setValue(this.plugin.settings.llmApiUrl)
+                .onChange(async (value) => {
+                    this.plugin.settings.llmApiUrl = value.trim();
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName("API key")
+            .setDesc("Stored only in your local vault configuration and transmitted as a Bearer token to the configured endpoint.")
+            .addText(text => {
+                text.inputEl.type = "password";
+                text
+                    .setPlaceholder("Optional")
+                    .setValue(this.plugin.settings.llmApiKey)
+                    .onChange(async (value) => {
+                        this.plugin.settings.llmApiKey = value;
+                        await this.plugin.saveSettings();
+                    });
+            });
+
+        new Setting(containerEl)
+            .setName("Model")
+            .setDesc("Optional model name hint passed to compatible endpoints (for example, OpenAI's `gpt-3.5-turbo`).")
+            .addText(text => text
+                .setPlaceholder("Optional")
+                .setValue(this.plugin.settings.llmModel)
+                .onChange(async (value) => {
+                    this.plugin.settings.llmModel = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName("Request timeout (ms)")
+            .setDesc("How long to wait for the endpoint before giving up. Increase this if your provider is slow.")
+            .addText(text => {
+                text.inputEl.type = "number";
+                text
+                    .setValue(this.plugin.settings.llmRequestTimeout.toString())
+                    .onChange(async (value) => {
+                        const timeout = parseInt(value, 10);
+                        if (!Number.isNaN(timeout) && timeout > 0) {
+                            this.plugin.settings.llmRequestTimeout = timeout;
+                            await this.plugin.saveSettings();
+                        }
+                    });
+            });
     }
 
     private async reloadWords() {

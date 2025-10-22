@@ -34,7 +34,11 @@ export interface CompletrSettings {
     frontMatterIgnoreCase: boolean,
     calloutProviderEnabled: boolean,
     calloutProviderSource: CalloutProviderSource,
-    llmProvider: LLMProviderSettings,
+    llmProviderEnabled: boolean,
+    llmApiUrl: string,
+    llmApiKey: string,
+    llmModel: string,
+    llmRequestTimeout: number,
 }
 
 export const DEFAULT_SETTINGS: CompletrSettings = {
@@ -60,13 +64,11 @@ export const DEFAULT_SETTINGS: CompletrSettings = {
     frontMatterIgnoreCase: true,
     calloutProviderEnabled: true,
     calloutProviderSource: CalloutProviderSource.COMPLETR,
-    llmProvider: {
-        enabled: true,
-        endpoint: "http://127.0.0.1:5000",
-        apiKey: "",
-        timeout: 10000,
-        model: "",
-    },
+    llmProviderEnabled: true,
+    llmApiUrl: "http://127.0.0.1:5000",
+    llmApiKey: "",
+    llmModel: "",
+    llmRequestTimeout: 10000,
 }
 
 export function intoCompletrPath(vault: Vault, ...path: string[]): string {
@@ -79,4 +81,17 @@ export interface LLMProviderSettings {
     apiKey?: string;
     model?: string;
     timeout?: number;
+}
+
+export function getLLMProviderSettings(settings: CompletrSettings): LLMProviderSettings {
+    const endpoint = settings.llmApiUrl?.trim() ?? "";
+    const model = settings.llmModel?.trim();
+    const timeout = settings.llmRequestTimeout;
+    return {
+        enabled: settings.llmProviderEnabled,
+        endpoint,
+        apiKey: settings.llmApiKey?.trim() ? settings.llmApiKey : undefined,
+        model: model ? model : undefined,
+        timeout: Number.isFinite(timeout) && timeout > 0 ? timeout : undefined,
+    };
 }
