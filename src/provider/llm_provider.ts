@@ -1,4 +1,5 @@
 import { requestUrl } from "obsidian";
+import type { RequestUrlResponse } from "obsidian";
 import { Suggestion, SuggestionContext, SuggestionProvider } from "./provider";
 import { CompletrSettings, LLMProviderSettings, getLLMProviderSettings } from "../settings";
 
@@ -82,7 +83,7 @@ class LlmSuggestionProvider implements SuggestionProvider {
             if (response.status < 200 || response.status >= 300)
                 return [];
 
-            const payload = response.json ?? this.safeParseJson(response.text);
+            const payload = await this.resolvePayload(response);
             let words = this.extractWords(payload);
 
             if (!words.length)
@@ -227,6 +228,44 @@ class LlmSuggestionProvider implements SuggestionProvider {
         } catch {
             return null;
         }
+    }
+
+    private async resolvePayload(response: RequestUrlResponse): Promise<unknown> {
+        const resolvedJson = await this.resolvePossiblePromise(response.json);
+        if (resolvedJson !== undefined && resolvedJson !== null) {
+            if (typeof resolvedJson === "string") {
+                const parsed = this.safeParseJson(resolvedJson);
+                if (parsed !== null)
+                    return parsed;
+            } else {
+                return resolvedJson;
+            }
+        }
+
+        const resolvedText = await this.resolvePossiblePromise(response.text);
+        if (typeof resolvedText === "string")
+            return this.safeParseJson(resolvedText);
+
+        return null;
+    }
+
+    private async resolvePossiblePromise<T>(value: T | Promise<T>): Promise<T>;
+    private async resolvePossiblePromise<T>(value: T | Promise<T> | undefined | null): Promise<T | undefined | null>;
+    private async resolvePossiblePromise<T>(value: T | Promise<T> | undefined | null): Promise<T | undefined | null> {
+        if (this.isPromise(value)) {
+            try {
+                return await value;
+            } catch (error) {
+                console.warn("Completr: Failed to resolve LLM response", error);
+                return undefined;
+            }
+        }
+
+        return value;
+    }
+
+    private isPromise<T>(value: T | Promise<T> | undefined | null): value is Promise<T> {
+        return !!value && typeof value === "object" && typeof (value as Promise<T>).then === "function";
     }
 }
 
