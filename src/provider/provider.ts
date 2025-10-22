@@ -46,8 +46,11 @@ export class Suggestion {
     }
 }
 
+export type SuggestionTriggerSource = "manual" | "auto" | "unknown";
+
 export interface SuggestionContext extends EditorSuggestContext {
     separatorChar: string;
+    triggerSource?: SuggestionTriggerSource;
 }
 
 export interface SuggestionProvider {

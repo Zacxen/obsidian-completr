@@ -1,12 +1,13 @@
 import { requestUrl } from "obsidian";
 import type { RequestUrlResponse } from "obsidian";
-import { Suggestion, SuggestionContext, SuggestionProvider } from "./provider";
+import { Suggestion, SuggestionContext, SuggestionProvider, SuggestionTriggerSource } from "./provider";
 import { CompletrSettings, LLMProviderSettings, getLLMProviderSettings } from "../settings";
 
 const CACHE_SEPARATOR = "\u241E"; // Record separator character to avoid clashes with real text.
 const OPENAI_CONTEXT_LIMIT = 6000;
 const DEFAULT_OPENAI_MODEL = "gpt-3.5-turbo";
 const OPENAI_JSON_PROMPT = "You are an autocomplete assistant for the Obsidian note-taking app. Return ONLY a JSON array of suggestion strings with no commentary.";
+const DEFAULT_TRIGGER_SOURCE: SuggestionTriggerSource = "unknown";
 
 class LlmSuggestionProvider implements SuggestionProvider {
 
@@ -21,7 +22,10 @@ class LlmSuggestionProvider implements SuggestionProvider {
             return [];
 
         const priorText = context.editor.getRange({ line: 0, ch: 0 }, context.end);
+        const triggerSource = context.triggerSource ?? DEFAULT_TRIGGER_SOURCE;
         const cacheKey = this.createCacheKey(priorText, context.separatorChar);
+
+        this.logTrigger(triggerSource, context);
 
         if (this.cacheKey === cacheKey)
             return this.cacheValue;
@@ -29,7 +33,7 @@ class LlmSuggestionProvider implements SuggestionProvider {
         if (this.inflightPromise && this.inflightKey === cacheKey)
             return this.inflightPromise;
 
-        const requestPromise = this.fetchSuggestions(providerSettings, priorText, context.separatorChar, context.query ?? "");
+        const requestPromise = this.fetchSuggestions(providerSettings, priorText, context.separatorChar, context.query ?? "", triggerSource);
         this.inflightKey = cacheKey;
         this.inflightPromise = requestPromise;
 
@@ -56,7 +60,13 @@ class LlmSuggestionProvider implements SuggestionProvider {
         return `${priorText}${CACHE_SEPARATOR}${separator ?? ""}`;
     }
 
-    private async fetchSuggestions(settings: LLMProviderSettings, priorText: string, separator: string, query: string): Promise<Suggestion[]> {
+    private async fetchSuggestions(
+        settings: LLMProviderSettings,
+        priorText: string,
+        separator: string,
+        query: string,
+        triggerSource: SuggestionTriggerSource,
+    ): Promise<Suggestion[]> {
         try {
             const isOpenAI = this.isOpenAIEndpoint(settings.endpoint);
             const body = isOpenAI
@@ -67,6 +77,11 @@ class LlmSuggestionProvider implements SuggestionProvider {
                     query,
                     model: settings.model,
                 });
+
+            this.logRequest(settings.endpoint, triggerSource, body, {
+                separator,
+                query,
+            });
 
             const response = await requestUrl({
                 url: settings.endpoint,
@@ -80,10 +95,13 @@ class LlmSuggestionProvider implements SuggestionProvider {
                 throw: false,
             });
 
+            const payload = await this.resolvePayload(response);
+
+            this.logResponse(settings.endpoint, triggerSource, response.status, payload);
+
             if (response.status < 200 || response.status >= 300)
                 return [];
 
-            const payload = await this.resolvePayload(response);
             let words = this.extractWords(payload);
 
             if (!words.length)
@@ -91,7 +109,10 @@ class LlmSuggestionProvider implements SuggestionProvider {
 
             return words.map((word) => Suggestion.fromString(word));
         } catch (error) {
-            console.warn("Completr: Failed to fetch LLM suggestions", error);
+            console.warn("Completr: Failed to fetch LLM suggestions", {
+                triggerSource,
+                error,
+            });
             return [];
         }
     }
@@ -266,6 +287,51 @@ class LlmSuggestionProvider implements SuggestionProvider {
 
     private isPromise<T>(value: T | Promise<T> | undefined | null): value is Promise<T> {
         return !!value && typeof value === "object" && typeof (value as Promise<T>).then === "function";
+    }
+
+    private logTrigger(triggerSource: SuggestionTriggerSource, context: SuggestionContext): void {
+        console.debug("Completr LLM: Triggered provider", {
+            triggerSource,
+            query: context.query,
+            separator: context.separatorChar,
+            cursor: context.end,
+        });
+    }
+
+    private logRequest(
+        endpoint: string | undefined,
+        triggerSource: SuggestionTriggerSource,
+        body: string,
+        context: { separator: string; query: string },
+    ): void {
+        let parsedBody: unknown = body;
+        try {
+            parsedBody = JSON.parse(body);
+        } catch {
+            parsedBody = body;
+        }
+
+        console.debug("Completr LLM: Outgoing request", {
+            triggerSource,
+            endpoint,
+            separator: context.separator,
+            query: context.query,
+            body: parsedBody,
+        });
+    }
+
+    private logResponse(
+        endpoint: string | undefined,
+        triggerSource: SuggestionTriggerSource,
+        status: number,
+        payload: unknown,
+    ): void {
+        console.debug("Completr LLM: Incoming response", {
+            triggerSource,
+            endpoint,
+            status,
+            payload,
+        });
     }
 }
 
