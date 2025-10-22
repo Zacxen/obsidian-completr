@@ -1,6 +1,6 @@
 import { requestUrl } from "obsidian";
 import { Suggestion, SuggestionContext, SuggestionProvider } from "./provider";
-import { CompletrSettings, LLMProviderSettings } from "../settings";
+import { CompletrSettings, LLMProviderSettings, getLLMProviderSettings } from "../settings";
 
 const CACHE_SEPARATOR = "\u241E"; // Record separator character to avoid clashes with real text.
 const OPENAI_CONTEXT_LIMIT = 6000;
@@ -15,7 +15,7 @@ class LlmSuggestionProvider implements SuggestionProvider {
     private inflightPromise: Promise<Suggestion[]> | null = null;
 
     async getSuggestions(context: SuggestionContext, settings: CompletrSettings): Promise<Suggestion[]> {
-        const providerSettings = settings.llmProvider;
+        const providerSettings = getLLMProviderSettings(settings);
         if (!this.isEnabled(providerSettings))
             return [];
 
@@ -48,7 +48,7 @@ class LlmSuggestionProvider implements SuggestionProvider {
     }
 
     private isEnabled(settings: LLMProviderSettings | undefined): settings is LLMProviderSettings {
-        return !!settings && settings.enabled && !!settings.endpoint;
+        return !!settings && settings.enabled && !!settings.endpoint?.trim();
     }
 
     private createCacheKey(priorText: string, separator: string): string {

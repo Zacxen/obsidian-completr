@@ -69,6 +69,15 @@ Browse the community plugins list and search for `Completr`.
   or [here](https://forum.obsidian.md/t/function-keys-cant-be-bound-as-hotkeys-without-modifiers/26956/4), as Obsidian
   currently does not support this.
 
+### LLM provider
+
+- Enable **LLM provider** in the settings tab to request completions from a custom language model endpoint. Configure the
+  endpoint URL, optional model name, API key, and request timeout to match your service.
+- When enabled, the plugin sends the text surrounding your cursor to the configured endpoint so it can generate
+  suggestions. Only use providers that you trust with this content.
+- The API key is stored in your vault configuration file (`.obsidian/plugins/obsidian-completr/data.json`) and is only sent
+  as an Authorization header when contacting your configured endpoint.
+
 ## Example usage
 
 #### Latex snippets
