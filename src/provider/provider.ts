@@ -53,5 +53,5 @@ export interface SuggestionContext extends EditorSuggestContext {
 export interface SuggestionProvider {
     blocksAllOtherProviders?: boolean,
 
-    getSuggestions(context: SuggestionContext, settings: CompletrSettings): Suggestion[],
+    getSuggestions(context: SuggestionContext, settings: CompletrSettings): Suggestion[] | Promise<Suggestion[]>,
 }

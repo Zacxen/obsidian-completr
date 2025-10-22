@@ -62,26 +62,30 @@ export default class SuggestionPopup extends EditorSuggest<Suggestion> {
         this.focused = false;
     }
 
-    getSuggestions(
+    async getSuggestions(
         context: EditorSuggestContext
-    ): Suggestion[] | Promise<Suggestion[]> {
+    ): Promise<Suggestion[] | null> {
         let suggestions: Suggestion[] = [];
 
         for (let provider of PROVIDERS) {
-            suggestions = [...suggestions, ...provider.getSuggestions({
+            const providerSuggestions = await provider.getSuggestions({
                 ...context,
                 separatorChar: this.separatorChar
-            }, this.settings)];
+            }, this.settings);
 
-            if (provider.blocksAllOtherProviders && suggestions.length > 0) {
-                suggestions.forEach((suggestion) => {
-                    if (!suggestion.overrideStart)
-                        return;
+            if (providerSuggestions && providerSuggestions.length > 0) {
+                suggestions = [...suggestions, ...providerSuggestions];
 
-                    // Fixes popup position
-                    this.context.start = suggestion.overrideStart;
-                });
-                break;
+                if (provider.blocksAllOtherProviders) {
+                    providerSuggestions.forEach((suggestion) => {
+                        if (!suggestion.overrideStart)
+                            return;
+
+                        // Fixes popup position
+                        this.context.start = suggestion.overrideStart;
+                    });
+                    break;
+                }
             }
         }
 
