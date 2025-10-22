@@ -18,8 +18,9 @@ import { FrontMatter } from "./provider/front_matter_provider";
 import {matchWordBackwards} from "./editor_helpers";
 import { SuggestionBlacklist } from "./provider/blacklist";
 import { Callout } from "./provider/callout_provider";
+import { LLM } from "./provider/llm_provider";
 
-const PROVIDERS: SuggestionProvider[] = [FrontMatter, Callout, Latex, FileScanner, WordList];
+const PROVIDERS: SuggestionProvider[] = [FrontMatter, Callout, Latex, LLM, FileScanner, WordList];
 
 export default class SuggestionPopup extends EditorSuggest<Suggestion> {
     /**
