@@ -411,6 +411,18 @@ export default class CompletrSettingsTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
+            .setName("Temperature")
+            .setDesc("Controls the randomness of language model suggestions. Higher values increase variety.")
+            .addSlider(slider => slider
+                .setLimits(0, 2, 0.1)
+                .setDynamicTooltip()
+                .setValue(this.plugin.settings.llmTemperature)
+                .onChange(async (value) => {
+                    this.plugin.settings.llmTemperature = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
             .setName("Request timeout (ms)")
             .setDesc("How long to wait for the endpoint before giving up. Increase this if your provider is slow.")
             .addText(text => {
