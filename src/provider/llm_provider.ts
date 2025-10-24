@@ -6,7 +6,7 @@ import { CompletrSettings, LLMProviderSettings, getLLMProviderSettings } from ".
 const CACHE_SEPARATOR = "\u241E"; // Record separator character to avoid clashes with real text.
 const CHAT_COMPLETION_CONTEXT_LIMIT = 6000;
 const DEFAULT_CHAT_MODEL = "gpt-3.5-turbo";
-const CHAT_COMPLETION_PROMPT = "You are an autocomplete assistant for the Obsidian note-taking app. Complete what word the user is typing. Return ONLY a JSON array of 5 suggestion words with no commentary.";
+const CHAT_COMPLETION_PROMPT = "You are an autocomplete assistant for the Obsidian note-taking app. Complete what word the user is typing. Return ONLY a JSON array of 5 single suggestion words with no commentary. If the last word a user has is a partial word, suggest what words the user is trying to type.";
 const DEFAULT_CHAT_TEMPERATURE = 0.7;
 const DEFAULT_TRIGGER_SOURCE: SuggestionTriggerSource = "unknown";
 
