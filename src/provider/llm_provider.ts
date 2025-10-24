@@ -31,8 +31,12 @@ class LlmSuggestionProvider implements SuggestionProvider {
         if (this.cacheKey === cacheKey)
             return this.cacheValue;
 
-        if (this.inflightPromise && this.inflightKey === cacheKey)
-            return this.inflightPromise;
+        if (this.inflightPromise) {
+            if (this.inflightKey === cacheKey)
+                return this.inflightPromise;
+
+            return [];
+        }
 
         const requestPromise = this.fetchSuggestions(providerSettings, priorText, context.separatorChar, context.query ?? "", triggerSource);
         this.inflightKey = cacheKey;
