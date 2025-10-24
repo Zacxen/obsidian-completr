@@ -1,7 +1,8 @@
 import { requestUrl } from "obsidian";
-import type { RequestUrlResponse } from "obsidian";
+import type { Editor, EditorPosition, RequestUrlResponse } from "obsidian";
 import { Suggestion, SuggestionContext, SuggestionProvider, SuggestionTriggerSource } from "./provider";
 import { CompletrSettings, LLMProviderSettings, getLLMProviderSettings } from "../settings";
+import { editorToCodeMirrorState, indexFromPos, posFromIndex } from "../editor_helpers";
 
 const CACHE_SEPARATOR = "\u241E"; // Record separator character to avoid clashes with real text.
 const CHAT_COMPLETION_CONTEXT_LIMIT = 6000;
@@ -10,9 +11,24 @@ const CHAT_COMPLETION_PROMPT = "You are an autocomplete assistant for the Obsidi
 const DEFAULT_CHAT_TEMPERATURE = 0.7;
 const DEFAULT_TRIGGER_SOURCE: SuggestionTriggerSource = "unknown";
 
+type PreparedRequestSource = "generated" | "cache";
+
+type PreparedRequest = {
+    body: string;
+    clippedContext: string;
+    model: string | undefined;
+    temperature: number;
+    source: PreparedRequestSource;
+};
+
+type CachedSuggestions = {
+    suggestions: Suggestion[];
+    request: PreparedRequest;
+};
+
 type PendingRequest = {
     settings: LLMProviderSettings;
-    priorText: string;
+    request: PreparedRequest;
     separator: string;
     query: string;
     triggerSource: SuggestionTriggerSource;
@@ -21,25 +37,37 @@ type PendingRequest = {
 class LlmSuggestionProvider implements SuggestionProvider {
 
     private cacheKey: string | null = null;
-    private cacheValue: Suggestion[] = [];
+    private cacheValue: CachedSuggestions | null = null;
     private inflightKey: string | null = null;
     private inflightPromise: Promise<Suggestion[]> | null = null;
     private pendingKey: string | null = null;
     private pendingArgs: PendingRequest | null = null;
+    private requestCache = new Map<string, PreparedRequest>();
 
     async getSuggestions(context: SuggestionContext, settings: CompletrSettings): Promise<Suggestion[]> {
         const providerSettings = getLLMProviderSettings(settings);
         if (!this.isEnabled(providerSettings))
             return [];
 
-        const priorText = context.editor.getRange({ line: 0, ch: 0 }, context.end);
+        const limitedContext = this.readLimitedContext(context.editor, context.end, CHAT_COMPLETION_CONTEXT_LIMIT);
+        const clippedContext = this.clipContext(limitedContext, CHAT_COMPLETION_CONTEXT_LIMIT);
+        const temperature = this.resolveTemperature(providerSettings.temperature);
+        const model = this.resolveModel(providerSettings);
         const triggerSource = context.triggerSource ?? DEFAULT_TRIGGER_SOURCE;
-        const cacheKey = this.createCacheKey(priorText, context.separatorChar);
+        const cacheKey = this.createCacheKey(clippedContext, context.separatorChar, model, temperature);
+        const cachedSuggestions = this.cacheKey === cacheKey ? this.cacheValue : null;
 
         this.logTrigger(triggerSource, context);
 
-        if (this.cacheKey === cacheKey)
-            return this.cacheValue;
+        if (cachedSuggestions)
+            return cachedSuggestions.suggestions;
+
+        const cachedRequest = this.requestCache.get(cacheKey);
+        const request = cachedRequest ? this.clonePreparedRequest(cachedRequest, "cache") : this.prepareChatCompletionRequest(
+            clippedContext,
+            model,
+            temperature,
+        );
 
         if (this.inflightPromise) {
             if (this.inflightKey === cacheKey)
@@ -48,7 +76,7 @@ class LlmSuggestionProvider implements SuggestionProvider {
             this.pendingKey = cacheKey;
             this.pendingArgs = {
                 settings: providerSettings,
-                priorText,
+                request,
                 separator: context.separatorChar,
                 query: context.query ?? "",
                 triggerSource,
@@ -59,7 +87,7 @@ class LlmSuggestionProvider implements SuggestionProvider {
 
         return this.executeRequest(cacheKey, {
             settings: providerSettings,
-            priorText,
+            request,
             separator: context.separatorChar,
             query: context.query ?? "",
             triggerSource,
@@ -70,24 +98,31 @@ class LlmSuggestionProvider implements SuggestionProvider {
         return !!settings && settings.enabled && !!settings.endpoint?.trim();
     }
 
-    private createCacheKey(priorText: string, separator: string): string {
-        return `${priorText}${CACHE_SEPARATOR}${separator ?? ""}`;
+    private createCacheKey(clippedContext: string, separator: string, model: string | undefined, temperature: number): string {
+        const components = [
+            clippedContext,
+            separator ?? "",
+            model ?? "",
+            temperature.toFixed(3),
+        ];
+
+        return components.join(CACHE_SEPARATOR);
     }
 
     private async fetchSuggestions(
         settings: LLMProviderSettings,
-        priorText: string,
+        request: PreparedRequest,
         separator: string,
         query: string,
         triggerSource: SuggestionTriggerSource,
     ): Promise<Suggestion[]> {
         try {
-            const body = this.buildChatCompletionBody(settings, priorText);
+            const body = request.body;
 
             this.logRequest(settings.endpoint, triggerSource, body, {
                 separator,
                 query,
-            });
+            }, request.source);
 
             const response = await requestUrl({
                 url: settings.endpoint,
@@ -123,11 +158,11 @@ class LlmSuggestionProvider implements SuggestionProvider {
         }
     }
 
-    private buildChatCompletionBody(settings: LLMProviderSettings, priorText: string): string {
-        const clippedContext = this.clipContext(priorText, CHAT_COMPLETION_CONTEXT_LIMIT);
-        const model = settings.model?.trim() || (this.isOpenAIEndpoint(settings.endpoint) ? DEFAULT_CHAT_MODEL : undefined);
-        const temperature = this.resolveTemperature(settings.temperature);
-
+    private prepareChatCompletionRequest(
+        clippedContext: string,
+        model: string | undefined,
+        temperature: number,
+    ): PreparedRequest {
         const payload: Record<string, unknown> = {
             temperature,
             messages: [
@@ -139,7 +174,45 @@ class LlmSuggestionProvider implements SuggestionProvider {
         if (model)
             payload.model = model;
 
-        return JSON.stringify(payload);
+        return {
+            body: JSON.stringify(payload),
+            clippedContext,
+            model,
+            temperature,
+            source: "generated",
+        };
+    }
+
+    private clonePreparedRequest(request: PreparedRequest, source: PreparedRequestSource = request.source): PreparedRequest {
+        return {
+            body: request.body,
+            clippedContext: request.clippedContext,
+            model: request.model,
+            temperature: request.temperature,
+            source,
+        };
+    }
+
+    private storePreparedRequest(key: string, request: PreparedRequest): void {
+        this.requestCache.set(key, this.clonePreparedRequest(request, "generated"));
+
+        while (this.requestCache.size > 20) {
+            const iterator = this.requestCache.keys().next();
+            if (iterator.done)
+                break;
+
+            this.requestCache.delete(iterator.value);
+        }
+    }
+
+    private readLimitedContext(editor: Editor, end: EditorPosition, limit: number): string {
+        const state = editorToCodeMirrorState(editor);
+        const doc = state.doc;
+        const endIndex = indexFromPos(doc, end);
+        const startIndex = Math.max(0, endIndex - limit);
+        const start = posFromIndex(doc, startIndex);
+
+        return editor.getRange(start, end);
     }
 
     private clipContext(priorText: string, limit: number): string {
@@ -147,6 +220,14 @@ class LlmSuggestionProvider implements SuggestionProvider {
             return priorText;
 
         return priorText.slice(priorText.length - limit);
+    }
+
+    private resolveModel(settings: LLMProviderSettings): string | undefined {
+        const configuredModel = settings.model?.trim();
+        if (configuredModel)
+            return configuredModel;
+
+        return this.isOpenAIEndpoint(settings.endpoint) ? DEFAULT_CHAT_MODEL : undefined;
     }
 
     private resolveTemperature(value: number | undefined): number {
@@ -313,6 +394,7 @@ class LlmSuggestionProvider implements SuggestionProvider {
         triggerSource: SuggestionTriggerSource,
         body: string,
         context: { separator: string; query: string },
+        requestSource: PreparedRequestSource,
     ): void {
         let parsedBody: unknown = body;
         try {
@@ -326,6 +408,7 @@ class LlmSuggestionProvider implements SuggestionProvider {
             endpoint,
             separator: context.separator,
             query: context.query,
+            requestSource,
             body: parsedBody,
         });
     }
@@ -347,7 +430,7 @@ class LlmSuggestionProvider implements SuggestionProvider {
     private async executeRequest(key: string, args: PendingRequest): Promise<Suggestion[]> {
         const requestPromise = this.fetchSuggestions(
             args.settings,
-            args.priorText,
+            args.request,
             args.separator,
             args.query,
             args.triggerSource,
@@ -360,7 +443,12 @@ class LlmSuggestionProvider implements SuggestionProvider {
             const suggestions = await requestPromise;
             if (this.inflightKey === key) {
                 this.cacheKey = key;
-                this.cacheValue = suggestions;
+                const cachedRequest = this.clonePreparedRequest(args.request);
+                this.cacheValue = {
+                    suggestions,
+                    request: cachedRequest,
+                };
+                this.storePreparedRequest(key, cachedRequest);
             }
             return suggestions;
         } finally {
