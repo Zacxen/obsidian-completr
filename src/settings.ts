@@ -38,6 +38,7 @@ export interface CompletrSettings {
     llmApiUrl: string,
     llmApiKey: string,
     llmModel: string,
+    llmTemperature: number,
     llmRequestTimeout: number,
 }
 
@@ -68,6 +69,7 @@ export const DEFAULT_SETTINGS: CompletrSettings = {
     llmApiUrl: "http://127.0.0.1:5000/v1/chat/completions",
     llmApiKey: "",
     llmModel: "",
+    llmTemperature: 0.7,
     llmRequestTimeout: 10000,
 }
 
@@ -80,6 +82,7 @@ export interface LLMProviderSettings {
     endpoint: string;
     apiKey?: string;
     model?: string;
+    temperature?: number;
     timeout?: number;
 }
 
@@ -87,11 +90,13 @@ export function getLLMProviderSettings(settings: CompletrSettings): LLMProviderS
     const endpoint = settings.llmApiUrl?.trim() ?? "";
     const model = settings.llmModel?.trim();
     const timeout = settings.llmRequestTimeout;
+    const temperature = settings.llmTemperature;
     return {
         enabled: settings.llmProviderEnabled,
         endpoint,
         apiKey: settings.llmApiKey?.trim() ? settings.llmApiKey : undefined,
         model: model ? model : undefined,
+        temperature: Number.isFinite(temperature) ? temperature : undefined,
         timeout: Number.isFinite(timeout) && timeout > 0 ? timeout : undefined,
     };
 }

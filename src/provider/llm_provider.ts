@@ -4,9 +4,10 @@ import { Suggestion, SuggestionContext, SuggestionProvider, SuggestionTriggerSou
 import { CompletrSettings, LLMProviderSettings, getLLMProviderSettings } from "../settings";
 
 const CACHE_SEPARATOR = "\u241E"; // Record separator character to avoid clashes with real text.
-const OPENAI_CONTEXT_LIMIT = 6000;
-const DEFAULT_OPENAI_MODEL = "gpt-3.5-turbo";
-const OPENAI_JSON_PROMPT = "You are an autocomplete assistant for the Obsidian note-taking app. Return ONLY a JSON array of suggestion strings with no commentary.";
+const CHAT_COMPLETION_CONTEXT_LIMIT = 6000;
+const DEFAULT_CHAT_MODEL = "gpt-3.5-turbo";
+const CHAT_COMPLETION_PROMPT = "You are an autocomplete assistant for the Obsidian note-taking app. Complete what word the user is typing. Return ONLY a JSON array of 5 suggestion words with no commentary.";
+const DEFAULT_CHAT_TEMPERATURE = 0.7;
 const DEFAULT_TRIGGER_SOURCE: SuggestionTriggerSource = "unknown";
 
 class LlmSuggestionProvider implements SuggestionProvider {
@@ -68,15 +69,7 @@ class LlmSuggestionProvider implements SuggestionProvider {
         triggerSource: SuggestionTriggerSource,
     ): Promise<Suggestion[]> {
         try {
-            const isOpenAI = this.isOpenAIEndpoint(settings.endpoint);
-            const body = isOpenAI
-                ? this.buildOpenAIBody(settings, priorText, separator, query)
-                : JSON.stringify({
-                    text: priorText,
-                    separator,
-                    query,
-                    model: settings.model,
-                });
+            const body = this.buildChatCompletionBody(settings, priorText);
 
             this.logRequest(settings.endpoint, triggerSource, body, {
                 separator,
@@ -117,30 +110,23 @@ class LlmSuggestionProvider implements SuggestionProvider {
         }
     }
 
-    private buildOpenAIBody(settings: LLMProviderSettings, priorText: string, separator: string, query: string): string {
-        const clippedContext = this.clipContext(priorText, OPENAI_CONTEXT_LIMIT);
-        const model = settings.model?.trim() || DEFAULT_OPENAI_MODEL;
+    private buildChatCompletionBody(settings: LLMProviderSettings, priorText: string): string {
+        const clippedContext = this.clipContext(priorText, CHAT_COMPLETION_CONTEXT_LIMIT);
+        const model = settings.model?.trim() || (this.isOpenAIEndpoint(settings.endpoint) ? DEFAULT_CHAT_MODEL : undefined);
+        const temperature = this.resolveTemperature(settings.temperature);
 
-        const userContent = [
-            "Context before cursor:",
-            clippedContext || "<empty>",
-            "",
-            `Separator character: ${separator ?? ""}`,
-            `Current query: ${query ?? ""}`,
-            "",
-            "Return up to 5 likely continuations as a JSON array of strings only.",
-        ].join("\n");
-
-        return JSON.stringify({
-            model,
+        const payload: Record<string, unknown> = {
+            temperature,
             messages: [
-                { role: "system", content: OPENAI_JSON_PROMPT },
-                { role: "user", content: userContent },
+                { role: "system", content: CHAT_COMPLETION_PROMPT },
+                { role: "user", content: clippedContext },
             ],
-            temperature: 0.2,
-            n: 1,
-            max_tokens: 64,
-        });
+        };
+
+        if (model)
+            payload.model = model;
+
+        return JSON.stringify(payload);
     }
 
     private clipContext(priorText: string, limit: number): string {
@@ -148,6 +134,14 @@ class LlmSuggestionProvider implements SuggestionProvider {
             return priorText;
 
         return priorText.slice(priorText.length - limit);
+    }
+
+    private resolveTemperature(value: number | undefined): number {
+        if (typeof value !== "number" || Number.isNaN(value))
+            return DEFAULT_CHAT_TEMPERATURE;
+
+        const clamped = Math.max(0, Math.min(2, value));
+        return clamped;
     }
 
     private isOpenAIEndpoint(endpoint: string | undefined): boolean {
