@@ -22,6 +22,10 @@ import { LLM } from "./provider/llm_provider";
 
 const PROVIDERS: SuggestionProvider[] = [FrontMatter, Callout, Latex, LLM, FileScanner, WordList];
 
+function isPromiseLike<T>(value: PromiseLike<T> | T): value is PromiseLike<T> {
+    return !!value && typeof (value as PromiseLike<T>).then === "function";
+}
+
 export default class SuggestionPopup extends EditorSuggest<Suggestion> {
     /**
      * Hacky variable to prevent the suggestion window from immediately re-opening after completing a suggestion
@@ -68,40 +72,91 @@ export default class SuggestionPopup extends EditorSuggest<Suggestion> {
     async getSuggestions(
         context: EditorSuggestContext
     ): Promise<Suggestion[] | null> {
-        let suggestions: Suggestion[] = [];
+        const providerContext = {
+            ...context,
+            separatorChar: this.separatorChar,
+            triggerSource: this.triggerSource,
+        };
 
-        for (let provider of PROVIDERS) {
-            const providerSuggestions = await provider.getSuggestions({
-                ...context,
-                separatorChar: this.separatorChar,
-                triggerSource: this.triggerSource,
-            }, this.settings);
+        const providerResults: (Suggestion[] | undefined)[] = new Array(PROVIDERS.length);
+        const pendingAsync: Promise<void>[] = [];
+        let blockingIndex: number | null = null;
 
-            if (providerSuggestions && providerSuggestions.length > 0) {
-                suggestions = [...suggestions, ...providerSuggestions];
+        for (let i = 0; i < PROVIDERS.length; i++) {
+            if (blockingIndex !== null && i > blockingIndex)
+                break;
 
-                if (provider.blocksAllOtherProviders) {
-                    providerSuggestions.forEach((suggestion) => {
-                        if (!suggestion.overrideStart)
-                            return;
+            const provider = PROVIDERS[i];
+            const maybeSuggestions = provider.getSuggestions(providerContext, this.settings);
 
-                        // Fixes popup position
-                        this.context.start = suggestion.overrideStart;
+            if (isPromiseLike(maybeSuggestions)) {
+                const task = Promise.resolve(maybeSuggestions)
+                    .then((results) => results ?? [])
+                    .catch((error) => {
+                        console.warn("Completr: Failed to fetch suggestions", error);
+                        return [] as Suggestion[];
+                    })
+                    .then((results) => {
+                        providerResults[i] = results;
+
+                        if (results.length > 0 && provider.blocksAllOtherProviders) {
+                            blockingIndex = blockingIndex === null ? i : Math.min(blockingIndex, i);
+                            results.forEach((suggestion) => {
+                                if (!suggestion.overrideStart)
+                                    return;
+
+                                // Fixes popup position
+                                this.context.start = suggestion.overrideStart;
+                            });
+                        }
                     });
-                    break;
-                }
+
+                pendingAsync.push(task);
+                continue;
+            }
+
+            const providerSuggestions = maybeSuggestions ?? [];
+            providerResults[i] = providerSuggestions;
+
+            if (providerSuggestions.length > 0 && provider.blocksAllOtherProviders) {
+                providerSuggestions.forEach((suggestion) => {
+                    if (!suggestion.overrideStart)
+                        return;
+
+                    // Fixes popup position
+                    this.context.start = suggestion.overrideStart;
+                });
+
+                blockingIndex = i;
+                break;
             }
         }
 
-        const seen = new Set<string>();
-        suggestions = suggestions.filter((suggestion) => {
-            if (seen.has(suggestion.displayName))
-                return false;
+        if (pendingAsync.length > 0)
+            await Promise.allSettled(pendingAsync);
 
-            seen.add(suggestion.displayName);
-            return true;
-        });
-        return suggestions.length === 0 ? null : suggestions.filter(s => !SuggestionBlacklist.has(s));
+        const seen = new Set<string>();
+        const suggestions: Suggestion[] = [];
+        const lastIndex = blockingIndex ?? (PROVIDERS.length - 1);
+
+        for (let i = 0; i <= lastIndex && i < providerResults.length; i++) {
+            const providerSuggestions = providerResults[i];
+            if (!providerSuggestions || providerSuggestions.length === 0)
+                continue;
+
+            for (const suggestion of providerSuggestions) {
+                if (seen.has(suggestion.displayName))
+                    continue;
+
+                if (SuggestionBlacklist.has(suggestion))
+                    continue;
+
+                seen.add(suggestion.displayName);
+                suggestions.push(suggestion);
+            }
+        }
+
+        return suggestions.length === 0 ? null : suggestions;
     }
 
     onTrigger(cursor: EditorPosition, editor: Editor, file: TFile): EditorSuggestTriggerInfo | null {
