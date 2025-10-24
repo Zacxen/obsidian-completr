@@ -10,12 +10,22 @@ const CHAT_COMPLETION_PROMPT = "You are an autocomplete assistant for the Obsidi
 const DEFAULT_CHAT_TEMPERATURE = 0.7;
 const DEFAULT_TRIGGER_SOURCE: SuggestionTriggerSource = "unknown";
 
+type PendingRequest = {
+    settings: LLMProviderSettings;
+    priorText: string;
+    separator: string;
+    query: string;
+    triggerSource: SuggestionTriggerSource;
+};
+
 class LlmSuggestionProvider implements SuggestionProvider {
 
     private cacheKey: string | null = null;
     private cacheValue: Suggestion[] = [];
     private inflightKey: string | null = null;
     private inflightPromise: Promise<Suggestion[]> | null = null;
+    private pendingKey: string | null = null;
+    private pendingArgs: PendingRequest | null = null;
 
     async getSuggestions(context: SuggestionContext, settings: CompletrSettings): Promise<Suggestion[]> {
         const providerSettings = getLLMProviderSettings(settings);
@@ -35,26 +45,25 @@ class LlmSuggestionProvider implements SuggestionProvider {
             if (this.inflightKey === cacheKey)
                 return this.inflightPromise;
 
+            this.pendingKey = cacheKey;
+            this.pendingArgs = {
+                settings: providerSettings,
+                priorText,
+                separator: context.separatorChar,
+                query: context.query ?? "",
+                triggerSource,
+            };
+
             return [];
         }
 
-        const requestPromise = this.fetchSuggestions(providerSettings, priorText, context.separatorChar, context.query ?? "", triggerSource);
-        this.inflightKey = cacheKey;
-        this.inflightPromise = requestPromise;
-
-        try {
-            const suggestions = await requestPromise;
-            if (this.inflightKey === cacheKey) {
-                this.cacheKey = cacheKey;
-                this.cacheValue = suggestions;
-            }
-            return suggestions;
-        } finally {
-            if (this.inflightKey === cacheKey) {
-                this.inflightKey = null;
-                this.inflightPromise = null;
-            }
-        }
+        return this.executeRequest(cacheKey, {
+            settings: providerSettings,
+            priorText,
+            separator: context.separatorChar,
+            query: context.query ?? "",
+            triggerSource,
+        });
     }
 
     private isEnabled(settings: LLMProviderSettings | undefined): settings is LLMProviderSettings {
@@ -332,6 +341,49 @@ class LlmSuggestionProvider implements SuggestionProvider {
             endpoint,
             status,
             payload,
+        });
+    }
+
+    private async executeRequest(key: string, args: PendingRequest): Promise<Suggestion[]> {
+        const requestPromise = this.fetchSuggestions(
+            args.settings,
+            args.priorText,
+            args.separator,
+            args.query,
+            args.triggerSource,
+        );
+
+        this.inflightKey = key;
+        this.inflightPromise = requestPromise;
+
+        try {
+            const suggestions = await requestPromise;
+            if (this.inflightKey === key) {
+                this.cacheKey = key;
+                this.cacheValue = suggestions;
+            }
+            return suggestions;
+        } finally {
+            if (this.inflightKey === key) {
+                this.inflightKey = null;
+                this.inflightPromise = null;
+                this.processPending();
+            }
+        }
+    }
+
+    private processPending(): void {
+        if (this.inflightPromise || !this.pendingKey || !this.pendingArgs)
+            return;
+
+        const nextKey = this.pendingKey;
+        const nextArgs = this.pendingArgs;
+
+        this.pendingKey = null;
+        this.pendingArgs = null;
+
+        this.executeRequest(nextKey, nextArgs).catch((error) => {
+            console.warn("Completr: Failed to fetch pending LLM suggestions", error);
         });
     }
 }
