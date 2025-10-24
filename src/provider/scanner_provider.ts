@@ -40,8 +40,8 @@ class ScannerSuggestionProvider extends DictionaryProvider {
 
     async saveData(vault: Vault) {
         let output: string[] = [];
-        for (let entry of this.wordMap.entries()) {
-            output = [...output, ...entry[1]];
+        for (let words of this.wordMap.values()) {
+            output.push(...words);
         }
 
         await vault.adapter.write(intoCompletrPath(vault, SCANNED_WORDS_PATH), output.join("\n"));
