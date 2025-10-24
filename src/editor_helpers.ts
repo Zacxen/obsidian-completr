@@ -34,10 +34,12 @@ export function matchWordBackwards(
     let query = "", separatorChar = null;
 
     // Save some time for very long lines
-    let lookBackEnd = Math.max(0, cursor.ch - maxLookBackDistance);
+    const line = editor.getLine(cursor.line) ?? "";
+    const cursorCh = Math.min(Math.max(cursor.ch, 0), line.length);
+    const lookBackEnd = Math.max(0, cursorCh - maxLookBackDistance);
     // Find word in front of cursor
-    for (let i = cursor.ch - 1; i >= lookBackEnd; i--) {
-        const prevChar = editor.getRange({ ...cursor, ch: i }, { ...cursor, ch: i + 1 });
+    for (let i = cursorCh - 1; i >= lookBackEnd; i--) {
+        const prevChar = line.charAt(i);
         if (!charPredicate(prevChar)) {
             separatorChar = prevChar;
             break;
